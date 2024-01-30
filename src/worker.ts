@@ -5,24 +5,26 @@ import { getAddressFromPublicKey } from "@solana/web3.js";
 
 interface Params {
   count: number;
+  batchSize: number;
   criteria: Criteria;
 }
 
 type Criteria =
   | {
-      start: string;
-    }
+    start: string;
+  }
   | {
-      end: string;
-    }
+    end: string;
+  }
   | {
-      start: string;
-      end: string;
-    };
+    start: string;
+    end: string;
+  };
 
 onmessage = (event) =>
   (async () => {
     const params: Params = event.data;
+    const batchSize = params.batchSize || 10;
 
     const isMatch = (() => {
       const criteria = params.criteria;
@@ -43,35 +45,22 @@ onmessage = (event) =>
       (async () => {
         while (count < params.count) {
           try {
-            const keypair = await crypto.subtle.generateKey("Ed25519", true, [
-              "sign",
-              "verify",
-            ]);
-            keys.push(keypair);
-          } catch (_e) {
-            console.error("op1 fail");
-          }
-          count += 1;
-        }
-      })(),
-      (async () => {
-        while (keys.length > 0 || count < params.count) {
-          const keypair = keys.pop();
-          if (keypair) {
-            try {
+            const keypairs = await generateKeypairs(batchSize);
+            for (const keypair of keypairs) {
               const addr = await getAddressFromPublicKey(keypair.publicKey);
-
               if (isMatch(addr)) {
                 postMessage({ match: await exportBytes(keypair) });
               }
-            } catch (_e) {
-              console.error("op2 fail");
+              count++;
+              if (count % 100 === 0) {
+                postMessage({ count });
+              }
             }
-          } else {
-            await new Promise((resolve) => setTimeout(() => resolve(true), 0));
+          } catch (_e) {
+            console.error("op1 fail");
           }
         }
-      })(),
+      })()
     ]);
     postMessage({ exit: count });
   })().catch((e) => {
@@ -88,4 +77,13 @@ async function exportBytes(keypair: CryptoKeyPair): Promise<Uint8Array> {
   solanaKey.set(new Uint8Array(exportedPrivateKey).slice(16));
   solanaKey.set(new Uint8Array(exportedPublicKey), 32);
   return solanaKey;
+}
+
+async function generateKeypairs(batchSize: number): Promise<CryptoKeyPair[]> {
+  const keypairs = [];
+  for (let i = 0; i < batchSize; i++) {
+    const keypair = await crypto.subtle.generateKey("Ed25519", true, ["sign", "verify"]);
+    keypairs.push(keypair);
+  }
+  return keypairs;
 }
